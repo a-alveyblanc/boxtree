@@ -70,9 +70,11 @@ def demo_cost_model():
                 fmm_level_to_order=fmm_level_to_order)
         level_orders_list.append(wrangler.level_orders)
 
+        timing_data = {}
         from boxtree.fmm import drive_fmm
         src_weights = np.random.rand(tree.nsources).astype(tree.coord_dtype)
-        drive_fmm(actx, wrangler, (src_weights,))
+        drive_fmm(actx, wrangler, (src_weights,), timing_data=timing_data)
+        timing_results.append(timing_data)
 
     time_field_name = "process_elapsed"
 

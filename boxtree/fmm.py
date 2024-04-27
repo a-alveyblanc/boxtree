@@ -338,7 +338,8 @@ def drive_fmm(actx: PyOpenCLArrayContext,
               wrangler: ExpansionWranglerInterface,
               src_weight_vecs, *,
               global_src_idx_all_ranks=None,
-              global_tgt_idx_all_ranks=None):
+              global_tgt_idx_all_ranks=None,
+              timing_data=None):
     """Top-level driver routine for a fast multipole calculation.
 
     In part, this is intended as a template for custom FMMs, in the sense that
@@ -374,6 +375,8 @@ def drive_fmm(actx: PyOpenCLArrayContext,
     """
 
     traversal = wrangler.traversal
+    from boxtree.timing import TimingRecorder
+    recorder = TimingRecorder()
 
     # Interface guidelines: Attributes of the tree are assumed to be known
     # to the expansion wrangler and should not be passed.
@@ -389,21 +392,25 @@ def drive_fmm(actx: PyOpenCLArrayContext,
 
     # {{{ "Step 2.1:" Construct local multipoles
 
-    mpole_exps = wrangler.form_multipoles(
+    mpole_exps, timing_future = wrangler.form_multipoles(
             actx,
             traversal.level_start_source_box_nrs,
             traversal.source_boxes,
             src_weight_vecs)
 
+    recorder.add("form_multipoles", timing_future)
+
     # }}}
 
     # {{{ "Step 2.2:" Propagate multipoles upward
 
-    mpole_exps = wrangler.coarsen_multipoles(
+    mpole_exps, timing_future = wrangler.coarsen_multipoles(
             actx,
             traversal.level_start_source_parent_box_nrs,
             traversal.source_parent_boxes,
             mpole_exps)
+
+    recorder.add("coarsen_multipoles", timing_future)
 
     # mpole_exps is called Phi in [1]
 
@@ -413,12 +420,14 @@ def drive_fmm(actx: PyOpenCLArrayContext,
 
     # {{{ "Stage 3:" Direct evaluation from neighbor source boxes ("list 1")
 
-    potentials = wrangler.eval_direct(
+    potentials, timing_future = wrangler.eval_direct(
             actx,
             traversal.target_boxes,
             traversal.neighbor_source_boxes_starts,
             traversal.neighbor_source_boxes_lists,
             src_weight_vecs)
+
+    recorder.add("eval_direct", timing_future)
 
     # these potentials are called alpha in [1]
 
@@ -426,13 +435,15 @@ def drive_fmm(actx: PyOpenCLArrayContext,
 
     # {{{ "Stage 4:" translate separated siblings' ("list 2") mpoles to local
 
-    local_exps = wrangler.multipole_to_local(
+    local_exps, timing_future = wrangler.multipole_to_local(
             actx,
             traversal.level_start_target_or_target_parent_box_nrs,
             traversal.target_or_target_parent_boxes,
             traversal.from_sep_siblings_starts,
             traversal.from_sep_siblings_lists,
             mpole_exps)
+
+    recorder.add("multipole_to_local", timing_future)
 
     # local_exps represents both Gamma and Delta in [1]
 
@@ -443,11 +454,13 @@ def drive_fmm(actx: PyOpenCLArrayContext,
     # (the point of aiming this stage at particles is specifically to keep its
     # contribution *out* of the downward-propagating local expansions)
 
-    mpole_result = wrangler.eval_multipoles(
+    mpole_result, timing_future = wrangler.eval_multipoles(
             actx,
             traversal.target_boxes_sep_smaller_by_source_level,
             traversal.from_sep_smaller_by_level,
             mpole_exps)
+
+    recorder.add("eval_multipoles", timing_future)
 
     potentials = potentials + mpole_result
 
@@ -457,12 +470,14 @@ def drive_fmm(actx: PyOpenCLArrayContext,
         logger.debug("evaluate separated close smaller interactions directly "
                 "('list 3 close')")
 
-        direct_result = wrangler.eval_direct(
+        direct_result, timing_future = wrangler.eval_direct(
                 actx,
                 traversal.target_boxes,
                 traversal.from_sep_close_smaller_starts,
                 traversal.from_sep_close_smaller_lists,
                 src_weight_vecs)
+
+        recorder.add("eval_direct", timing_future)
 
         potentials = potentials + direct_result
 
@@ -470,7 +485,7 @@ def drive_fmm(actx: PyOpenCLArrayContext,
 
     # {{{ "Stage 6:" form locals for separated bigger source boxes ("list 4")
 
-    local_result = wrangler.form_locals(
+    local_result, timing_future = wrangler.form_locals(
             actx,
             traversal.level_start_target_or_target_parent_box_nrs,
             traversal.target_or_target_parent_boxes,
@@ -478,15 +493,19 @@ def drive_fmm(actx: PyOpenCLArrayContext,
             traversal.from_sep_bigger_lists,
             src_weight_vecs)
 
+    recorder.add("form_locals", timing_future)
+
     local_exps = local_exps + local_result
 
     if traversal.from_sep_close_bigger_starts is not None:
-        direct_result = wrangler.eval_direct(
+        direct_result, timing_future = wrangler.eval_direct(
                 actx,
                 traversal.target_boxes,
                 traversal.from_sep_close_bigger_starts,
                 traversal.from_sep_close_bigger_lists,
                 src_weight_vecs)
+
+        recorder.add("eval_direct", timing_future)
 
         potentials = potentials + direct_result
 
@@ -494,21 +513,25 @@ def drive_fmm(actx: PyOpenCLArrayContext,
 
     # {{{ "Stage 7:" propagate local_exps downward
 
-    local_exps = wrangler.refine_locals(
+    local_exps, timing_future = wrangler.refine_locals(
             actx,
             traversal.level_start_target_or_target_parent_box_nrs,
             traversal.target_or_target_parent_boxes,
             local_exps)
 
+    recorder.add("refine_locals", timing_future)
+
     # }}}
 
     # {{{ "Stage 8:" evaluate locals
 
-    local_result = wrangler.eval_locals(
+    local_result, timing_future = wrangler.eval_locals(
             actx,
             traversal.level_start_target_box_nrs,
             traversal.target_boxes,
             local_exps)
+
+    recorder.add("eval_locals", timing_future)
 
     potentials = potentials + local_result
 
@@ -524,7 +547,10 @@ def drive_fmm(actx: PyOpenCLArrayContext,
 
     fmm_proc.done()
 
+    if timing_data is not None:
+        timing_data.update(recorder.summarize())
+
     return result
 
 
-# vim: filetype=pyopencl:fdm=marker
+# vim: fdm=marker
