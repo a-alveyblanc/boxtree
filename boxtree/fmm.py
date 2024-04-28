@@ -292,7 +292,8 @@ class ExpansionWranglerInterface(ABC):
         :return: Received source weights of the current rank, including the root
             rank.
         """
-        return src_weight_vecs
+        import numpy as np
+        return actx.from_numpy(np.array(src_weight_vecs))
 
     def gather_potential_results(self,
             actx: PyOpenCLArrayContext,

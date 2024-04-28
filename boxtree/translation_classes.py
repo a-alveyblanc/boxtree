@@ -342,15 +342,35 @@ class TranslationClassesBuilder:
         translation_class_is_used = actx.zeros(ntranslation_classes, dtype=np.int32)
 
         error_flag = actx.zeros(1, dtype=np.int32)
+
+        from_sep_siblings_lists = trav.from_sep_siblings_lists
+        from_sep_siblings_starts = trav.from_sep_siblings_starts
+        target_or_target_parent_boxes = trav.target_or_target_parent_boxes
+        ntarget_or_target_parent_boxes = trav.ntarget_or_target_parent_boxes
+        box_centers = tree.box_centers
+        aligned_nboxes = tree.aligned_nboxes
+        root_extent = tree.root_extent
+        box_levels = tree.box_levels
+
+        args = [from_sep_siblings_lists,
+                from_sep_siblings_starts,
+                target_or_target_parent_boxes,
+                ntarget_or_target_parent_boxes,
+                box_centers,
+                aligned_nboxes,
+                root_extent,
+                box_levels]
+
+        new_args = []
+        for arg in args:
+            new_arg = arg
+            if isinstance(arg, np.ndarray):
+                new_arg = actx.from_numpy(arg)
+            new_args.append(new_arg)
+        args = new_args
+
         evt = knl_info.translation_class_finder(
-                trav.from_sep_siblings_lists,
-                trav.from_sep_siblings_starts,
-                trav.target_or_target_parent_boxes,
-                trav.ntarget_or_target_parent_boxes,
-                tree.box_centers,
-                tree.aligned_nboxes,
-                tree.root_extent,
-                tree.box_levels,
+                *args,
                 well_sep_is_n_away,
                 translation_classes_lists,
                 translation_class_is_used,

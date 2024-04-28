@@ -43,6 +43,12 @@ class PyOpenCLArrayContext(PyOpenCLArrayContextBase):
         default_ep = t_unit.default_entrypoint
         options = default_ep.options
 
+        # {{{ loop fusion
+
+
+
+        # }}}
+
         if not (options.return_dict and options.no_numpy):
             raise ValueError("Loopy kernel passed to call_loopy must "
                     "have return_dict and no_numpy options set. "
