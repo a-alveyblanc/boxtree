@@ -23,8 +23,10 @@ THE SOFTWARE.
 import numpy as np
 
 from arraycontext import (  # noqa: F401
-    PyOpenCLArrayContext as PyOpenCLArrayContextBase, deserialize_container,
-    rec_map_array_container, serialize_container, with_array_context)
+    PyOpenCLArrayContext as PyOpenCLArrayContextBase,
+    PytatoPyOpenCLArrayContext as PytatoPyOpenCLArrayContextBase,
+    deserialize_container,
+    rec_map_array_container, serialize_container,)
 from arraycontext.pytest import (
     _PytestPyOpenCLArrayContextFactoryWithClass,
     register_pytest_array_context_factory)
@@ -38,16 +40,12 @@ __doc__ = """
 
 # {{{ array context
 
-class PyOpenCLArrayContext(PyOpenCLArrayContextBase):
+# {{{ pytato arraycontext
+
+class PytatoPyOpenCLArrayContext(PytatoPyOpenCLArrayContextBase):
     def transform_loopy_program(self, t_unit):
         default_ep = t_unit.default_entrypoint
         options = default_ep.options
-
-        # {{{ loop fusion
-
-
-
-        # }}}
 
         if not (options.return_dict and options.no_numpy):
             raise ValueError("Loopy kernel passed to call_loopy must "
@@ -94,6 +92,64 @@ class PyOpenCLArrayContext(PyOpenCLArrayContextBase):
                     f"but expected one of {allowed_types}")
 
         return rec_map_array_container(_wrapper, array)
+
+# }}}
+
+
+# {{{ pyopencl arraycontext
+
+class PyOpenCLArrayContext(PyOpenCLArrayContextBase):
+    def transform_loopy_program(self, t_unit):
+        default_ep = t_unit.default_entrypoint
+        options = default_ep.options
+
+        if not (options.return_dict and options.no_numpy):
+            raise ValueError("Loopy kernel passed to call_loopy must "
+                    "have return_dict and no_numpy options set. "
+                    "Did you use arraycontext.make_loopy_program "
+                    "to create this kernel?")
+
+        return t_unit
+
+    # NOTE: _rec_map_container is copied from arraycontext wholesale and should
+    # be kept in sync as much as possible!
+
+    def _rec_map_container(self, func, array, allowed_types=None, *,
+            default_scalar=None, strict=False):
+        import arraycontext.impl.pyopencl.taggable_cl_array as tga
+
+        if allowed_types is None:
+            allowed_types = (tga.TaggableCLArray,)
+
+        def _wrapper(ary):
+            # NOTE: this is copied verbatim from arraycontext and this is the
+            # only change to allow optional fields inside containers
+            if ary is None:
+                return ary
+
+            if isinstance(ary, allowed_types):
+                return func(ary)
+            elif not strict and isinstance(ary, self.array_types):
+                from warnings import warn
+                warn(f"Invoking {type(self).__name__}.{func.__name__[1:]} with "
+                    f"{type(ary).__name__} will be unsupported in 2023. Use "
+                    "'to_tagged_cl_array' to convert instances to TaggableCLArray.",
+                    DeprecationWarning, stacklevel=2)
+                return func(tga.to_tagged_cl_array(ary))
+            elif np.isscalar(ary):
+                if default_scalar is None:
+                    return ary
+                else:
+                    return np.array(ary).dtype.type(default_scalar)
+            else:
+                raise TypeError(
+                    f"{type(self).__name__}.{func.__name__[1:]} invoked with "
+                    f"an unsupported array type: got '{type(ary).__name__}', "
+                    f"but expected one of {allowed_types}")
+
+        return rec_map_array_container(_wrapper, array)
+
+# }}}
 
 # }}}
 
