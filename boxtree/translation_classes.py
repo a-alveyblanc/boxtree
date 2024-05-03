@@ -337,11 +337,12 @@ class TranslationClassesBuilder:
         if is_translation_per_level:
             ntranslation_classes = ntranslation_classes * tree.nlevels
 
-        translation_classes_lists = actx.empty(
-            len(trav.from_sep_siblings_lists), dtype=np.int32)
-        translation_class_is_used = actx.zeros(ntranslation_classes, dtype=np.int32)
+        translation_classes_lists = actx.freeze(actx.zeros(
+            len(trav.from_sep_siblings_lists), dtype=np.int32))
+        translation_class_is_used = actx.freeze(actx.zeros(
+            ntranslation_classes, dtype=np.int32))
 
-        error_flag = actx.zeros(1, dtype=np.int32)
+        error_flag = actx.freeze(actx.zeros(1, dtype=np.int32))
 
         from_sep_siblings_lists = trav.from_sep_siblings_lists
         from_sep_siblings_starts = trav.from_sep_siblings_starts
@@ -430,13 +431,15 @@ class TranslationClassesBuilder:
 
         from_sep_siblings_translation_classes_level_starts[nlevels] = count
 
+        tcl_idxs = actx.to_numpy(translation_classes_lists)
         translation_classes_lists = actx.from_numpy(
-            used_translation_classes_map
-            )[translation_classes_lists]
+            used_translation_classes_map[tcl_idxs]
+        )
 
         distances = actx.from_numpy(distances)
         from_sep_siblings_translation_classes_level_starts = actx.from_numpy(
-            from_sep_siblings_translation_classes_level_starts)
+            from_sep_siblings_translation_classes_level_starts
+        )
 
         info = TranslationClassesInfo(
                 traversal=trav,
@@ -446,7 +449,7 @@ class TranslationClassesBuilder:
                     from_sep_siblings_translation_classes_level_starts),
                 )
 
-        return actx.freeze(info), evt
+        return info, evt
 
 # }}}
 
